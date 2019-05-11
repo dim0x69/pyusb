@@ -294,7 +294,7 @@ def _setup_prototypes(lib):
     # libusb_device *libusb_get_parent (libusb_device *dev)
     lib.libusb_get_parent.argtypes = [c_void_p]
     lib.libusb_get_parent.restype = c_void_p
-
+    
     # void libusb_free_device_list (libusb_device **list,
     #                               int unref_devices)
     lib.libusb_free_device_list.argtypes = [
@@ -411,7 +411,7 @@ def _setup_prototypes(lib):
     #                             uint16_t wLength,
     #                             unsigned int timeout)
     lib.libusb_control_transfer.argtypes = [
-            _libusb_device_handle,
+            _libusb_device_handle, 
             c_uint8,
             c_uint8,
             c_uint16,
@@ -420,7 +420,25 @@ def _setup_prototypes(lib):
             c_uint16,
             c_uint
         ]
+    
+    # int libusb_raw_control_transfer(
+    #           struct libusb_device_handle *dev_handle,
+	#           unsigned char endpoint,
+    #           unsigned char *data,
+    #           unsigned char *buff,
+    #           int length,
+    #           int *transferred,
+	#           unsigned int timeout)
 
+    lib.libusb_raw_control_transfer.argtypes = [
+                _libusb_device_handle, # device handle
+                c_ubyte, # endpoint
+                POINTER(c_ubyte), #*setup_request
+                POINTER(c_ubyte), #*return_data
+                c_int, # length
+                POINTER(c_int), # *transferred
+                c_uint # timeout
+            ]
     #int libusb_bulk_transfer(
     #           struct libusb_device_handle *dev_handle,
     #           unsigned char endpoint,
@@ -706,7 +724,7 @@ class _LibUSB(usb.backend.IBackend):
     @methodtrace(_logger)
     def enumerate_devices(self):
         return _DevIterator(self.ctx)
-
+        
     @methodtrace(_logger)
     def get_parent(self, dev):
         _parent = self.lib.libusb_get_parent(dev.devid)
@@ -714,7 +732,7 @@ class _LibUSB(usb.backend.IBackend):
             return None
         else:
             return _Device(_parent)
-
+    
     @methodtrace(_logger)
     def get_device_descriptor(self, dev):
         dev_desc = _libusb_device_descriptor()
@@ -858,6 +876,32 @@ class _LibUSB(usb.backend.IBackend):
     def iso_read(self, dev_handle, ep, intf, buff, timeout):
         handler = _IsoTransferHandler(dev_handle, ep, buff, timeout)
         return handler.submit(self.ctx)
+
+    @methodtrace(_logger)
+    def raw_control_write(self, dev_handle, ep, setup_request , return_data_buffer, length, timeout):
+
+        address_return_data_buffer, length = return_data_buffer.buffer_info()
+        length *= return_data_buffer.itemsize
+
+        address_setup_request, tmp = setup_request.buffer_info()
+
+        transferred = c_int()
+        
+        logging.debug(f"libusb_raw_control_transfer({dev_handle},\nep: {ep},\setup_request: {setup_request},\nlen(return_data_buffer): {len(return_data_buffer)},\ntransferred: {transferred},\ntimeout:{timeout})")
+
+        retval = self.lib.libusb_raw_control_transfer(dev_handle.handle,
+                  ep,
+                  cast(address_setup_request, POINTER(c_ubyte)),
+                  cast(address_return_data_buffer, POINTER(c_ubyte)), #,cast(address_buff, POINTER(c_ubyte)),
+                  length,
+                  byref(transferred),
+                  timeout)
+        # do not assume LIBUSB_ERROR_TIMEOUT means no I/O.
+
+        if not (transferred.value and retval == LIBUSB_ERROR_TIMEOUT):
+            _check(retval)
+        
+        return transferred.value
 
     @methodtrace(_logger)
     def ctrl_transfer(self,

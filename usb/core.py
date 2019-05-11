@@ -212,7 +212,7 @@ class _ResourceManager(object):
             for intf in self.get_active_configuration(device):
                 ep = util.find_descriptor(intf, bEndpointAddress=endpoint_address)
                 if ep is not None:
-                    self._ep_info[endpoint_address] = (intf, ep)
+                    self._ep_info[endpoint_address] = (intf, ep)               
                     return intf, ep
 
             raise ValueError('Invalid endpoint address ' + hex(endpoint_address))
@@ -786,7 +786,7 @@ class Device(_objfinalizer.AutoFinalizedObject):
             self.speed = int(desc.speed)
         else:
             self.speed = None
-
+            
         self._has_parent = None
         self._parent = None
 
@@ -917,6 +917,40 @@ class Device(_objfinalizer.AutoFinalizedObject):
         self._ctx.backend.reset_device(self._ctx.handle)
         self._ctx.dispose(self, True)
 
+
+    def raw_ctrl(self, setup_request, return_data_buffer, timeout=None, endpoint=0x80):
+        r"""
+            Do a raw control transfer and return the received data 
+            in return_data_buffer.
+
+            return data buffer should be a array which holds enough space
+            for the response. 
+
+            In case you want to send out a control transfer on != endpoint 0,
+            you can do that. TODO: need to claim interface so that works
+
+            How to use:
+                
+                import usb.util
+                return_data_buffer = usb.util.create_buffer(4096)
+                setup_request = [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00]
+                ret = device.raw_ctrl(setup_request, return_data_buffer)
+                print(f"received {ret} bytes from device.")
+        """
+        self._ctx.managed_open()
+        # def raw_control_write(self, dev_handle, ep, data, length, timeout)
+        
+        backend = self._ctx.backend
+        
+        return backend.raw_control_write(
+                self._ctx.handle,
+                endpoint,
+                _interop.as_array(setup_request),
+                return_data_buffer,
+                len(return_data_buffer),
+                self.__get_timeout(timeout)
+            )       
+
     def write(self, endpoint, data, timeout = None):
         r"""Write data to the endpoint.
 
@@ -939,16 +973,16 @@ class Device(_objfinalizer.AutoFinalizedObject):
                     util.ENDPOINT_TYPE_ISO:backend.iso_write
                 }
 
-        intf, ep = self._ctx.setup_request(self, endpoint)
+        intf, ep = self._ctx.setup_request(self, endpoint)    
         fn = fn_map[util.endpoint_type(ep.bmAttributes)]
 
         return fn(
-                self._ctx.handle,
-                ep.bEndpointAddress,
-                intf.bInterfaceNumber,
-                _interop.as_array(data),
-                self.__get_timeout(timeout)
-            )
+                    self._ctx.handle,
+                    ep.bEndpointAddress,
+                    intf.bInterfaceNumber,
+                    _interop.as_array(data),
+                    self.__get_timeout(timeout)
+                )
 
     def read(self, endpoint, size_or_buffer, timeout = None):
         r"""Read data from the endpoint.
